@@ -1,39 +1,212 @@
 .app-shell {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
   padding: 2rem;
 }
 
-.card {
-  width: min(100%, 40rem);
-  padding: 3rem;
-  border-radius: 1.5rem;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.16);
-  backdrop-filter: blur(20px);
+.notes-panel {
+  width: min(100%, 72rem);
+  margin: 0 auto;
+  padding: clamp(1.5rem, 3vw, 3rem);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 2rem;
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(22px);
+}
+
+.notes-header {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 2rem;
 }
 
 .eyebrow {
-  margin: 0 0 1rem;
+  margin: 0 0 0.75rem;
   font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  font-weight: 800;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #b45309;
+  color: #9a3412;
+}
+
+h1,
+h2 {
+  margin: 0;
+  color: #0f172a;
 }
 
 h1 {
-  margin: 0;
   font-size: clamp(2.5rem, 6vw, 4.5rem);
-  line-height: 0.95;
-  color: #111827;
+  line-height: 0.92;
+}
+
+h2 {
+  font-size: 1.25rem;
 }
 
 .copy {
+  margin: 0;
+  max-width: 36rem;
+  font-size: 1rem;
+  line-height: 1.7;
+  color: #334155;
+}
+
+.label {
+  display: block;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.composer,
+.note-card,
+.notes-list {
+  border-radius: 1.5rem;
+}
+
+.composer,
+.notes-list {
+  background: rgba(248, 250, 252, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.composer {
+  padding: 1.25rem;
+}
+
+.composer-actions,
+.note-actions,
+.notes-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 0.95rem 1rem;
+  color: #0f172a;
+  min-height: 7rem;
+}
+
+.textarea:focus {
+  outline: 2px solid rgba(14, 165, 233, 0.35);
+  border-color: #0ea5e9;
+}
+
+.primary-button,
+.secondary-button,
+.danger-button {
+  border: none;
+  border-radius: 999px;
+  padding: 0.75rem 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+
+.primary-button:disabled,
+.secondary-button:disabled,
+.danger-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.primary-button:hover:not(:disabled),
+.secondary-button:hover:not(:disabled),
+.danger-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.primary-button {
+  background: linear-gradient(135deg, #0f766e, #0ea5e9);
+  color: white;
+}
+
+.secondary-button {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.danger-button {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.error-banner,
+.empty-state {
   margin: 1rem 0 0;
-  max-width: 32rem;
-  font-size: 1.05rem;
-  line-height: 1.6;
-  color: #374151;
+  padding: 1rem 1.1rem;
+  border-radius: 1rem;
+}
+
+.error-banner {
+  background: rgba(254, 226, 226, 0.9);
+  color: #991b1b;
+}
+
+.empty-state {
+  background: rgba(241, 245, 249, 0.9);
+  color: #475569;
+}
+
+.notes-list {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+}
+
+.notes-list-header {
+  margin-bottom: 1rem;
+}
+
+.note-card {
+  padding: 1.25rem;
+  background: white;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+}
+
+.note-card + .note-card {
+  margin-top: 1rem;
+}
+
+.note-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.note-content {
+  margin: 0;
+  white-space: pre-wrap;
+  color: #1e293b;
+  line-height: 1.7;
+}
+
+@media (max-width: 720px) {
+  .app-shell {
+    padding: 1rem;
+  }
+
+  .notes-list-header,
+  .note-actions,
+  .composer-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .primary-button,
+  .secondary-button,
+  .danger-button {
+    width: 100%;
+  }
 }
