@@ -1,5 +1,10 @@
 import express, { type Request, type Response } from 'express';
-import { ensureNotesTable, pool, type NoteRecord } from './db.js';
+import { ensureNotesTable, pool, type NoteRecord, withTransaction } from './db.js';
+import {
+  deleteNoteFromVectorStore,
+  getVectorSyncStatus,
+  syncNoteToVectorStore,
+} from './vector.js';
 
 const app = express();
 const port = Number(process.env.PORT) || 3001;
@@ -23,6 +28,7 @@ app.get('/api/health', async (_req, res) => {
   res.status(200).json({
     ok: true,
     service: 'agent-playground-server',
+    vectorSync: getVectorSyncStatus(),
   });
 });
 
@@ -42,16 +48,27 @@ app.post('/api/notes', async (req, res) => {
     return;
   }
 
-  const result = await pool.query<NoteRecord>(
-    `
-      INSERT INTO notes (content)
-      VALUES ($1)
-      RETURNING id, content, created_at, updated_at
-    `,
-    [content],
-  );
+  const note = await withTransaction(async (client) => {
+    const result = await client.query<NoteRecord>(
+      `
+        INSERT INTO notes (content)
+        VALUES ($1)
+        RETURNING id, content, created_at, updated_at
+      `,
+      [content],
+    );
 
-  res.status(201).json(result.rows[0]);
+    const nextNote = result.rows[0];
+
+    if (!nextNote) {
+      throw new Error('Failed to create note.');
+    }
+
+    await syncNoteToVectorStore(nextNote);
+    return nextNote;
+  });
+
+  res.status(201).json(note);
 });
 
 app.put('/api/notes/:id', async (req, res) => {
@@ -68,22 +85,33 @@ app.put('/api/notes/:id', async (req, res) => {
     return;
   }
 
-  const result = await pool.query<NoteRecord>(
-    `
-      UPDATE notes
-      SET content = $1, updated_at = NOW()
-      WHERE id = $2
-      RETURNING id, content, created_at, updated_at
-    `,
-    [content, noteId],
-  );
+  const note = await withTransaction(async (client) => {
+    const result = await client.query<NoteRecord>(
+      `
+        UPDATE notes
+        SET content = $1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING id, content, created_at, updated_at
+      `,
+      [content, noteId],
+    );
 
-  if (!result.rows[0]) {
+    const nextNote = result.rows[0];
+
+    if (!nextNote) {
+      return null;
+    }
+
+    await syncNoteToVectorStore(nextNote);
+    return nextNote;
+  });
+
+  if (!note) {
     res.status(404).json({ error: 'Note not found.' });
     return;
   }
 
-  res.status(200).json(result.rows[0]);
+  res.status(200).json(note);
 });
 
 app.delete('/api/notes/:id', async (req, res) => {
@@ -94,17 +122,28 @@ app.delete('/api/notes/:id', async (req, res) => {
     return;
   }
 
-  const result = await pool.query<NoteRecord>(
-    'DELETE FROM notes WHERE id = $1 RETURNING id, content, created_at, updated_at',
-    [noteId],
-  );
+  const note = await withTransaction(async (client) => {
+    const result = await client.query<NoteRecord>(
+      'DELETE FROM notes WHERE id = $1 RETURNING id, content, created_at, updated_at',
+      [noteId],
+    );
 
-  if (!result.rows[0]) {
+    const deletedNote = result.rows[0];
+
+    if (!deletedNote) {
+      return null;
+    }
+
+    await deleteNoteFromVectorStore(noteId);
+    return deletedNote;
+  });
+
+  if (!note) {
     res.status(404).json({ error: 'Note not found.' });
     return;
   }
 
-  res.status(200).json(result.rows[0]);
+  res.status(200).json(note);
 });
 
 app.use((error: unknown, _req: Request, res: Response, _next: () => void) => {
