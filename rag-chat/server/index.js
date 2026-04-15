@@ -31,6 +31,7 @@ const DEFAULT_SYSTEM_PROMPT =
 const DEFAULT_UPLOAD_PREFIX = process.env.IDRIVE_E2_KEY_PREFIX || 'documents'
 const DEFAULT_PINECONE_NAMESPACE = process.env.PINECONE_NAMESPACE || ''
 const DEFAULT_RETRIEVAL_LIMIT = Number(process.env.RAG_TOP_K ?? 6)
+const MIN_RETRIEVAL_SCORE = Number(process.env.RAG_MIN_SCORE ?? 0)
 const CHUNK_SIZE = Number(process.env.RAG_CHUNK_SIZE ?? 1200)
 const CHUNK_OVERLAP = Number(process.env.RAG_CHUNK_OVERLAP ?? 200)
 const UPSERT_BATCH_SIZE = 50
@@ -380,7 +381,7 @@ async function toLangChainMessages(messages, systemPrompt, retrievedContext) {
 
   const contextSection =
     typeof retrievedContext === 'string' && retrievedContext.trim()
-      ? `\n\nRetrieved context:\n${retrievedContext.trim()}\n\nUse the retrieved context when it is relevant to the user's request. If the context is insufficient, say so plainly and do not invent citations or facts.`
+      ? `\n\nRetrieved context:\n${retrievedContext.trim()}\n\nUse the retrieved context when it is relevant to the user's request. Prefer grounding claims in the retrieved material and cite sources inline like [Source 1] when the answer depends on them. If the context is insufficient, say so plainly and do not invent citations or facts.`
       : ''
 
   return [
@@ -945,6 +946,17 @@ async function retrieveRelevantChunks(queryText) {
         text,
       }
     })
+    .filter((match) => {
+      if (!match) {
+        return false
+      }
+
+      if (typeof match.score !== 'number') {
+        return true
+      }
+
+      return match.score >= MIN_RETRIEVAL_SCORE
+    })
     .filter(Boolean)
 }
 
@@ -970,6 +982,8 @@ function serializeSources(chunks) {
     storageKey: chunk.storageKey,
     chunkIndex: chunk.chunkIndex,
     score: chunk.score,
+    excerpt:
+      chunk.text.length > 240 ? `${chunk.text.slice(0, 240).trim()}...` : chunk.text,
   }))
 }
 
@@ -1107,6 +1121,11 @@ const server = http.createServer((req, res) => {
             role: 'assistant',
             content,
             sources: serializeSources(retrievedChunks),
+          },
+          retrieval: {
+            query: latestUserMessage?.content || '',
+            sourceCount: retrievedChunks.length,
+            usedContext: retrievedChunks.length > 0,
           },
         })
       })

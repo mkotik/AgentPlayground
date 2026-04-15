@@ -237,6 +237,24 @@ h1 {
   color: #4b6571;
 }
 
+.source-item {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+}
+
+.source-item p:first-child {
+  font-weight: 700;
+}
+
+.retrieval-banner {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(29, 109, 102, 0.08);
+  border: 1px solid rgba(29, 109, 102, 0.2);
+  color: #1d5b56;
+}
+
 .error-banner {
   padding: 14px 16px;
   border-radius: 16px;

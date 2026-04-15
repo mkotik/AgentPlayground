@@ -47,10 +47,11 @@ Open the Vite URL, usually `http://localhost:5173`. Enter a prompt in the text a
 - `PINECONE_INDEX` is the Pinecone index used for chunk embeddings and retrieval.
 - `PINECONE_NAMESPACE` is optional if you want to isolate vectors in a namespace.
 - `RAG_TOP_K` is optional. Default: `6`
+- `RAG_MIN_SCORE` is optional. Default: `0`
 - `RAG_CHUNK_SIZE` is optional. Default: `1200`
 - `RAG_CHUNK_OVERLAP` is optional. Default: `200`
 
-The browser sends the full chat transcript to `POST /api/chat`. The server embeds the latest user message, retrieves matching chunks from Pinecone, injects them into the prompt, and returns the assistant reply.
+The browser sends the full chat transcript to `POST /api/chat`. The server embeds the latest user message, retrieves matching chunks from Pinecone, injects them into the prompt, and returns the assistant reply together with retrieval metadata and source matches.
 
 ## PDF Uploads
 

@@ -22,6 +22,7 @@ type ChatSource = {
   storageKey: string | null
   chunkIndex: number | null
   score: number | null
+  excerpt: string
 }
 
 type FileRecord = {
@@ -29,6 +30,12 @@ type FileRecord = {
   fileName: string
   processingStatus: string
   chunkCount: number | null
+}
+
+type RetrievalInfo = {
+  query: string
+  sourceCount: number
+  usedContext: boolean
 }
 
 const API_BASE_URL = 'http://localhost:3001'
@@ -40,6 +47,7 @@ export default function App() {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [retrievalInfo, setRetrievalInfo] = useState<RetrievalInfo | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [isSending, setIsSending] = useState(false)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
@@ -163,6 +171,7 @@ export default function App() {
 
     setDraft('')
     setError(null)
+    setRetrievalInfo(null)
     setIsSending(true)
     setMessages(nextMessages)
 
@@ -175,13 +184,14 @@ export default function App() {
         body: JSON.stringify({ messages: nextMessages }),
       })
       const payload = (await response.json()) as
-        | { message?: ChatMessage; error?: string }
+        | { message?: ChatMessage; retrieval?: RetrievalInfo; error?: string }
         | undefined
 
       if (!response.ok || !payload?.message) {
         throw new Error(payload?.error || 'Chat request failed')
       }
 
+      setRetrievalInfo(payload.retrieval || null)
       setMessages([...nextMessages, payload.message])
     } catch (err) {
       const message =
@@ -265,12 +275,18 @@ export default function App() {
               {message.role === 'assistant' && message.sources?.length ? (
                 <div className="bubble-sources">
                   {message.sources.map((source) => (
-                    <p key={source.id}>
-                      Source: {source.fileName}
-                      {typeof source.chunkIndex === 'number'
-                        ? `, chunk ${source.chunkIndex + 1}`
-                        : ''}
-                    </p>
+                    <div key={source.id} className="source-item">
+                      <p>
+                        Source: {source.fileName}
+                        {typeof source.chunkIndex === 'number'
+                          ? `, chunk ${source.chunkIndex + 1}`
+                          : ''}
+                        {typeof source.score === 'number'
+                          ? `, score ${source.score.toFixed(3)}`
+                          : ''}
+                      </p>
+                      <p>{source.excerpt}</p>
+                    </div>
                   ))}
                 </div>
               ) : null}
@@ -286,6 +302,14 @@ export default function App() {
         </div>
 
         {error ? <div className="error-banner">{error}</div> : null}
+
+        {retrievalInfo ? (
+          <div className="retrieval-banner">
+            {retrievalInfo.usedContext
+              ? `Retrieved ${retrievalInfo.sourceCount} matching source${retrievalInfo.sourceCount === 1 ? '' : 's'} from Pinecone for the latest question.`
+              : 'No matching document context was retrieved for the latest question.'}
+          </div>
+        ) : null}
 
         <form className="composer" onSubmit={handleSubmit}>
           <label className="sr-only" htmlFor="prompt">
