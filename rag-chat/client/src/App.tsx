@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useRef, useState } from 'react'
 type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
+  sources?: ChatSource[]
 }
 
 type UploadTicket = {
@@ -12,6 +13,22 @@ type UploadTicket = {
   headers: {
     'Content-Type': string
   }
+}
+
+type ChatSource = {
+  id: string
+  fileId: string | null
+  fileName: string
+  storageKey: string | null
+  chunkIndex: number | null
+  score: number | null
+}
+
+type FileRecord = {
+  id: string
+  fileName: string
+  processingStatus: string
+  chunkCount: number | null
 }
 
 const API_BASE_URL = 'http://localhost:3001'
@@ -88,7 +105,36 @@ export default function App() {
         throw new Error(`Upload failed with status ${uploadResponse.status}`)
       }
 
-      setUploadSuccess(`Uploaded to ${payload.objectKey}`)
+      const fileResponse = await fetch(`${API_BASE_URL}/api/files`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          fileName: selectedFile.name,
+          storageKey: payload.objectKey,
+          contentType: selectedFile.type || 'application/pdf',
+          sizeBytes: selectedFile.size,
+          uploadStatus: 'uploaded',
+          ingest: true,
+        }),
+      })
+      const filePayload = (await fileResponse.json()) as
+        | { file?: FileRecord; error?: string }
+        | undefined
+
+      if (!fileResponse.ok || !filePayload?.file) {
+        throw new Error(filePayload?.error || 'Could not save uploaded file metadata')
+      }
+
+      const chunkSummary =
+        typeof filePayload.file.chunkCount === 'number'
+          ? ` with ${filePayload.file.chunkCount} chunks`
+          : ''
+
+      setUploadSuccess(
+        `${filePayload.file.fileName} uploaded and ${filePayload.file.processingStatus}${chunkSummary}.`,
+      )
       setSelectedFile(null)
 
       if (uploadInputRef.current) {
@@ -154,8 +200,7 @@ export default function App() {
           <h1>Simple AI Chat</h1>
           <p className="description">
             Send a prompt from the browser, let the server call the model, and
-            render the reply inline. Upload PDFs to IDrive E2 before the RAG
-            layer is added.
+            ground the answer with chunks retrieved from your uploaded PDFs.
           </p>
         </header>
 
@@ -163,8 +208,9 @@ export default function App() {
           <div>
             <p className="upload-label">Document uploads</p>
             <p className="upload-copy">
-              Choose a PDF and upload it directly to your IDrive E2 bucket with
-              a presigned URL from the server.
+              Choose a PDF and upload it directly to your IDrive E2 bucket. The
+              server will then save the file record and ingest it into Pinecone
+              synchronously.
             </p>
           </div>
 
@@ -216,6 +262,18 @@ export default function App() {
             >
               <p className="bubble-role">{message.role}</p>
               <p>{message.content}</p>
+              {message.role === 'assistant' && message.sources?.length ? (
+                <div className="bubble-sources">
+                  {message.sources.map((source) => (
+                    <p key={source.id}>
+                      Source: {source.fileName}
+                      {typeof source.chunkIndex === 'number'
+                        ? `, chunk ${source.chunkIndex + 1}`
+                        : ''}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
             </article>
           ))}
 
