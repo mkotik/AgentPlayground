@@ -3,6 +3,7 @@ import { ensureNotesTable, pool, type NoteRecord, withTransaction } from './db.j
 import {
   deleteNoteFromVectorStore,
   getVectorSyncStatus,
+  searchSimilarNotes,
   syncNoteToVectorStore,
 } from './vector.js';
 
@@ -11,15 +12,23 @@ const port = Number(process.env.PORT) || 3001;
 
 app.use(express.json());
 
-function parseContent(req: Request) {
-  const content =
-    typeof req.body?.content === 'string' ? req.body.content.trim() : '';
+function parseTextField(req: Request, fieldName: string) {
+  const value =
+    typeof req.body?.[fieldName] === 'string' ? req.body[fieldName].trim() : '';
 
-  if (!content) {
+  if (!value) {
     return null;
   }
 
-  return content;
+  return value;
+}
+
+function parseContent(req: Request) {
+  return parseTextField(req, 'content');
+}
+
+function parseQuery(req: Request) {
+  return parseTextField(req, 'query');
 }
 
 app.get('/api/health', async (_req, res) => {
@@ -38,6 +47,53 @@ app.get('/api/notes', async (_req, res: Response<NoteRecord[]>) => {
   );
 
   res.status(200).json(result.rows);
+});
+
+app.post('/api/notes/search', async (req, res) => {
+  const query = parseQuery(req);
+
+  if (!query) {
+    res.status(400).json({ error: 'Query is required.' });
+    return;
+  }
+
+  if (!getVectorSyncStatus().enabled) {
+    res.status(503).json({ error: 'Vector search is not configured.' });
+    return;
+  }
+
+  const matches = await searchSimilarNotes(query);
+
+  if (matches.length === 0) {
+    res.status(404).json({ error: 'No similar notes found.' });
+    return;
+  }
+
+  const noteIds = matches.map((match) => match.noteId);
+  const result = await pool.query<NoteRecord>(
+    `
+      SELECT id, content, created_at, updated_at
+      FROM notes
+      WHERE id = ANY($1::bigint[])
+    `,
+    [noteIds],
+  );
+
+  const notesById = new Map(
+    result.rows.map((note) => [Number(note.id), note] as const),
+  );
+  const bestMatch = matches.find((match) => notesById.has(match.noteId));
+
+  if (!bestMatch) {
+    res.status(404).json({ error: 'No similar notes found.' });
+    return;
+  }
+
+  res.status(200).json({
+    query,
+    score: bestMatch.score,
+    note: notesById.get(bestMatch.noteId),
+  });
 });
 
 app.post('/api/notes', async (req, res) => {

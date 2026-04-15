@@ -72,8 +72,16 @@ h2 {
   border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
-.composer {
+.composer,
+.search-panel {
   padding: 1.25rem;
+}
+
+.search-panel {
+  margin-top: 1.5rem;
+  border-radius: 1.5rem;
+  background: rgba(248, 250, 252, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 .composer-actions,
@@ -94,6 +102,38 @@ h2 {
   padding: 0.95rem 1rem;
   color: #0f172a;
   min-height: 7rem;
+}
+
+.search-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.search-input {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 0.95rem 1rem;
+  color: #0f172a;
+}
+
+.search-input:focus {
+  outline: 2px solid rgba(14, 165, 233, 0.35);
+  border-color: #0ea5e9;
+}
+
+.search-copy {
+  margin: 0.4rem 0 0;
+  color: #475569;
+}
+
+.search-result {
+  margin-top: 1rem;
+  padding: 1.25rem;
+  border-radius: 1.25rem;
+  background: white;
+  border: 1px solid rgba(226, 232, 240, 0.95);
 }
 
 .textarea:focus {

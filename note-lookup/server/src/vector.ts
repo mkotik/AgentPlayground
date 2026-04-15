@@ -28,6 +28,23 @@ type OpenAiEmbeddingsResponse = {
   }>;
 };
 
+type PineconeQueryMatch = {
+  id?: string;
+  score?: number;
+  metadata?: {
+    noteId?: number | string;
+  };
+};
+
+type PineconeQueryResponse = {
+  matches?: PineconeQueryMatch[];
+};
+
+export type SimilarNoteMatch = {
+  noteId: number;
+  score: number;
+};
+
 function readOptionalEnv(name: string) {
   const value = process.env[name]?.trim();
   return value ? value : null;
@@ -84,6 +101,36 @@ let resolvedPineconeIndexHost = pineconeIndexHost;
 
 function buildVectorId(noteId: number) {
   return `note:${noteId}`;
+}
+
+function parseNoteId(value: number | string | undefined) {
+  if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+
+    if (Number.isInteger(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function parseNoteIdFromMatch(match: PineconeQueryMatch) {
+  const metadataNoteId = parseNoteId(match.metadata?.noteId);
+
+  if (metadataNoteId) {
+    return metadataNoteId;
+  }
+
+  if (!match.id?.startsWith('note:')) {
+    return null;
+  }
+
+  return parseNoteId(match.id.slice('note:'.length));
 }
 
 function buildPineconeHeaders() {
@@ -241,4 +288,48 @@ export async function deleteNoteFromVectorStore(noteId: number) {
   if (!response.ok) {
     throw new Error(`Pinecone delete failed with ${await readErrorMessage(response)}`);
   }
+}
+
+export async function searchSimilarNotes(query: string, topK = 5) {
+  if (!isVectorSyncEnabled) {
+    return [];
+  }
+
+  const [indexHost, vector] = await Promise.all([
+    resolvePineconeIndexHost(),
+    createEmbedding(query),
+  ]);
+
+  const response = await fetch(`https://${indexHost}/query`, {
+    method: 'POST',
+    headers: buildPineconeHeaders(),
+    body: JSON.stringify({
+      namespace: pineconeNamespace,
+      vector,
+      topK,
+      includeValues: false,
+      includeMetadata: true,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Pinecone query failed with ${await readErrorMessage(response)}`);
+  }
+
+  const payload = (await response.json()) as PineconeQueryResponse;
+
+  return (payload.matches ?? [])
+    .map((match) => {
+      const noteId = parseNoteIdFromMatch(match);
+
+      if (!noteId || typeof match.score !== 'number') {
+        return null;
+      }
+
+      return {
+        noteId,
+        score: match.score,
+      } satisfies SimilarNoteMatch;
+    })
+    .filter((match): match is SimilarNoteMatch => match !== null);
 }

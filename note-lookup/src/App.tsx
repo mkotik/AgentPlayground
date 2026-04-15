@@ -8,7 +8,14 @@ type Note = {
   updated_at: string
 }
 
+type SearchResult = {
+  query: string
+  score: number
+  note: Note
+}
+
 const emptyError = ''
+const emptySearchError = ''
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, {
@@ -17,14 +24,22 @@ function formatDate(value: string) {
   }).format(new Date(value))
 }
 
+function formatScore(value: number) {
+  return value.toFixed(3)
+}
+
 function App() {
   const [notes, setNotes] = useState<Note[]>([])
   const [draft, setDraft] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResult, setSearchResult] = useState<SearchResult | null>(null)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editingValue, setEditingValue] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [isSearching, setIsSearching] = useState(false)
   const [error, setError] = useState(emptyError)
+  const [searchError, setSearchError] = useState(emptySearchError)
 
   async function loadNotes() {
     setIsLoading(true)
@@ -165,6 +180,55 @@ function App() {
     }
   }
 
+  async function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const query = searchQuery.trim()
+
+    if (!query) {
+      setSearchError('Enter a string to search for a similar note.')
+      return
+    }
+
+    setIsSearching(true)
+    setSearchError(emptySearchError)
+
+    try {
+      const response = await fetch('/api/notes/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query }),
+      })
+
+      if (response.status === 404) {
+        setSearchResult(null)
+        setSearchError('No similar notes were found yet.')
+        return
+      }
+
+      if (response.status === 503) {
+        setSearchResult(null)
+        setSearchError('Semantic search is not configured on the server.')
+        return
+      }
+
+      if (!response.ok) {
+        throw new Error('Failed to search notes.')
+      }
+
+      const nextResult: SearchResult = await response.json()
+      setSearchResult(nextResult)
+    } catch (searchRequestError) {
+      console.error(searchRequestError)
+      setSearchResult(null)
+      setSearchError('Unable to search notes right now.')
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
   return (
     <main className="app-shell">
       <section className="notes-panel">
@@ -198,6 +262,54 @@ function App() {
         </form>
 
         {error ? <p className="error-banner">{error}</p> : null}
+
+        <section className="search-panel">
+          <div className="notes-list-header">
+            <div>
+              <h2>Semantic search</h2>
+              <p className="search-copy">
+                Enter a string and retrieve the stored note that is most similar.
+              </p>
+            </div>
+          </div>
+
+          <form className="search-form" onSubmit={handleSearch}>
+            <label className="label" htmlFor="semantic-search">
+              Search string
+            </label>
+            <input
+              id="semantic-search"
+              className="search-input"
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="e.g. product launch checklist"
+            />
+            <button
+              className="primary-button"
+              type="submit"
+              disabled={isSearching}
+            >
+              {isSearching ? 'Searching...' : 'Find closest note'}
+            </button>
+          </form>
+
+          {searchError ? <p className="error-banner">{searchError}</p> : null}
+
+          {searchResult ? (
+            <article className="search-result">
+              <div className="note-meta">
+                <span>Best match for "{searchResult.query}"</span>
+                <span>Similarity {formatScore(searchResult.score)}</span>
+              </div>
+              <p className="note-content">{searchResult.note.content}</p>
+              <div className="note-meta">
+                <span>Updated {formatDate(searchResult.note.updated_at)}</span>
+                <span>Created {formatDate(searchResult.note.created_at)}</span>
+              </div>
+            </article>
+          ) : null}
+        </section>
 
         <section className="notes-list" aria-live="polite">
           <div className="notes-list-header">
