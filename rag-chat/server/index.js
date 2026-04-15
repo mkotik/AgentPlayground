@@ -1,4 +1,7 @@
+const crypto = require('crypto')
 const http = require('http')
+const { PutObjectCommand, S3Client } = require('@aws-sdk/client-s3')
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner')
 
 if (typeof process.loadEnvFile === 'function') {
   try {
@@ -16,9 +19,11 @@ const DEFAULT_MODEL = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini'
 const DEFAULT_SYSTEM_PROMPT =
   process.env.OPENROUTER_SYSTEM_PROMPT ||
   'You are a concise, helpful assistant.'
+const DEFAULT_UPLOAD_PREFIX = process.env.IDRIVE_E2_KEY_PREFIX || 'documents'
 
 let modelPromise = null
 let messagesModulePromise = null
+let storageClient = null
 
 function createHttpError(statusCode, message) {
   const error = new Error(message)
@@ -29,6 +34,57 @@ function createHttpError(statusCode, message) {
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, { 'Content-Type': 'application/json' })
   res.end(JSON.stringify(payload))
+}
+
+function getRequiredUploadConfig() {
+  const config = {
+    bucket: process.env.IDRIVE_E2_BUCKET,
+    endpoint: process.env.IDRIVE_E2_ENDPOINT,
+    region: process.env.IDRIVE_E2_REGION,
+    accessKeyId: process.env.IDRIVE_E2_ACCESS_KEY_ID,
+    secretAccessKey: process.env.IDRIVE_E2_SECRET_ACCESS_KEY,
+  }
+  const missing = Object.entries({
+    IDRIVE_E2_BUCKET: config.bucket,
+    IDRIVE_E2_ENDPOINT: config.endpoint,
+    IDRIVE_E2_REGION: config.region,
+    IDRIVE_E2_ACCESS_KEY_ID: config.accessKeyId,
+    IDRIVE_E2_SECRET_ACCESS_KEY: config.secretAccessKey,
+  })
+    .filter(([, value]) => !value)
+    .map(([name]) => name)
+
+  if (missing.length > 0) {
+    throw createHttpError(
+      500,
+      `Missing ${missing.join(', ')} in the server environment`,
+    )
+  }
+
+  return config
+}
+
+function normalizeStorageEndpoint(endpoint) {
+  const value = typeof endpoint === 'string' ? endpoint.trim() : ''
+  const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`
+
+  try {
+    return new URL(withProtocol).toString().replace(/\/$/, '')
+  } catch (error) {
+    throw createHttpError(
+      500,
+      'IDRIVE_E2_ENDPOINT must be a valid URL like https://your-endpoint.example.com',
+    )
+  }
+}
+
+function hasUploadConfig() {
+  try {
+    getRequiredUploadConfig()
+    return true
+  } catch (error) {
+    return false
+  }
 }
 
 function readJsonBody(req) {
@@ -68,6 +124,24 @@ function getOpenRouterHeaders() {
   }
 
   return headers
+}
+
+function getStorageClient() {
+  if (!storageClient) {
+    const config = getRequiredUploadConfig()
+
+    storageClient = new S3Client({
+      region: config.region,
+      endpoint: normalizeStorageEndpoint(config.endpoint),
+      forcePathStyle: true,
+      credentials: {
+        accessKeyId: config.accessKeyId,
+        secretAccessKey: config.secretAccessKey,
+      },
+    })
+  }
+
+  return storageClient
 }
 
 async function getChatModel() {
@@ -177,6 +251,74 @@ function getTextFromContent(content) {
     .trim()
 }
 
+function normalizeUploadPrefix(prefix) {
+  return prefix.replace(/^\/+|\/+$/g, '')
+}
+
+function sanitizeFileName(fileName) {
+  const rawFileName =
+    typeof fileName === 'string' && fileName.trim()
+      ? fileName.trim().split(/[\\/]/).pop()
+      : 'document.pdf'
+  const withExtension = rawFileName.toLowerCase().endsWith('.pdf')
+    ? rawFileName
+    : `${rawFileName}.pdf`
+  const sanitized = withExtension
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+
+  return sanitized || 'document.pdf'
+}
+
+function isPdfUpload(fileName, contentType) {
+  if (typeof fileName !== 'string' || !fileName.toLowerCase().endsWith('.pdf')) {
+    return false
+  }
+
+  if (typeof contentType !== 'string' || !contentType.trim()) {
+    return true
+  }
+
+  return ['application/pdf', 'application/x-pdf'].includes(
+    contentType.toLowerCase(),
+  )
+}
+
+async function createPresignedUpload(fileName, contentType) {
+  const config = getRequiredUploadConfig()
+  const normalizedContentType =
+    typeof contentType === 'string' && contentType.trim()
+      ? contentType.trim()
+      : 'application/pdf'
+  const keyPrefix = normalizeUploadPrefix(DEFAULT_UPLOAD_PREFIX)
+  const dateSegment = new Date().toISOString().slice(0, 10)
+  const objectKey = [
+    keyPrefix,
+    dateSegment,
+    `${crypto.randomUUID()}-${sanitizeFileName(fileName)}`,
+  ]
+    .filter(Boolean)
+    .join('/')
+  const command = new PutObjectCommand({
+    Bucket: config.bucket,
+    Key: objectKey,
+    ContentType: normalizedContentType,
+  })
+  const uploadUrl = await getSignedUrl(getStorageClient(), command, {
+    expiresIn: 300,
+  })
+
+  return {
+    uploadUrl,
+    objectKey,
+    method: 'PUT',
+    headers: {
+      'Content-Type': normalizedContentType,
+    },
+  }
+}
+
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
@@ -192,8 +334,41 @@ const server = http.createServer((req, res) => {
     sendJson(res, 200, {
       message: 'server is reachable',
       model: DEFAULT_MODEL,
+      uploadsConfigured: hasUploadConfig(),
       timestamp: new Date().toISOString(),
     })
+    return
+  }
+
+  if (req.method === 'POST' && req.url === '/api/uploads/presign') {
+    readJsonBody(req)
+      .then(async (payload) => {
+        const fileName =
+          typeof payload.fileName === 'string' ? payload.fileName.trim() : ''
+        const contentType =
+          typeof payload.contentType === 'string'
+            ? payload.contentType.trim()
+            : 'application/pdf'
+
+        if (!fileName) {
+          throw createHttpError(400, 'fileName is required')
+        }
+
+        if (!isPdfUpload(fileName, contentType)) {
+          throw createHttpError(400, 'Only PDF uploads are supported')
+        }
+
+        const upload = await createPresignedUpload(fileName, contentType)
+
+        sendJson(res, 200, upload)
+      })
+      .catch((error) => {
+        console.error(error)
+        sendJson(res, error.statusCode || 500, {
+          error: error.message || 'Could not create an upload URL',
+        })
+      })
+
     return
   }
 

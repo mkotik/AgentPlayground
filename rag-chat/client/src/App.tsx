@@ -5,14 +5,28 @@ type ChatMessage = {
   content: string
 }
 
+type UploadTicket = {
+  uploadUrl: string
+  objectKey: string
+  method: 'PUT'
+  headers: {
+    'Content-Type': string
+  }
+}
+
 const API_BASE_URL = 'http://localhost:3001'
 
 export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
   const [isSending, setIsSending] = useState(false)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
+  const uploadInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     const transcript = transcriptRef.current
@@ -23,6 +37,71 @@ export default function App() {
 
     transcript.scrollTop = transcript.scrollHeight
   }, [messages, isSending])
+
+  async function handleUploadSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!selectedFile || isUploading) {
+      return
+    }
+
+    if (!selectedFile.name.toLowerCase().endsWith('.pdf')) {
+      setUploadError('Only PDF files are supported.')
+      return
+    }
+
+    setIsUploading(true)
+    setUploadError(null)
+    setUploadSuccess(null)
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/uploads/presign`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          fileName: selectedFile.name,
+          contentType: selectedFile.type || 'application/pdf',
+        }),
+      })
+      const payload = (await response.json()) as
+        | ({ error?: string } & Partial<UploadTicket>)
+        | undefined
+
+      if (
+        !response.ok ||
+        !payload?.uploadUrl ||
+        !payload.objectKey ||
+        !payload.headers
+      ) {
+        throw new Error(payload?.error || 'Could not create an upload URL')
+      }
+
+      const uploadResponse = await fetch(payload.uploadUrl, {
+        method: payload.method || 'PUT',
+        headers: payload.headers,
+        body: selectedFile,
+      })
+
+      if (!uploadResponse.ok) {
+        throw new Error(`Upload failed with status ${uploadResponse.status}`)
+      }
+
+      setUploadSuccess(`Uploaded to ${payload.objectKey}`)
+      setSelectedFile(null)
+
+      if (uploadInputRef.current) {
+        uploadInputRef.current.value = ''
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Unable to upload the PDF'
+      setUploadError(message)
+    } finally {
+      setIsUploading(false)
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -75,9 +154,52 @@ export default function App() {
           <h1>Simple AI Chat</h1>
           <p className="description">
             Send a prompt from the browser, let the server call the model, and
-            render the reply inline.
+            render the reply inline. Upload PDFs to IDrive E2 before the RAG
+            layer is added.
           </p>
         </header>
+
+        <section className="upload-panel">
+          <div>
+            <p className="upload-label">Document uploads</p>
+            <p className="upload-copy">
+              Choose a PDF and upload it directly to your IDrive E2 bucket with
+              a presigned URL from the server.
+            </p>
+          </div>
+
+          <form className="upload-form" onSubmit={handleUploadSubmit}>
+            <label className="file-picker" htmlFor="pdf-upload">
+              <input
+                ref={uploadInputRef}
+                id="pdf-upload"
+                name="pdf-upload"
+                type="file"
+                accept="application/pdf,.pdf"
+                onChange={(event) => {
+                  setSelectedFile(event.target.files?.[0] ?? null)
+                  setUploadError(null)
+                  setUploadSuccess(null)
+                }}
+                disabled={isUploading}
+              />
+              <span>{selectedFile ? selectedFile.name : 'Select PDF'}</span>
+            </label>
+            <button
+              className="upload-button"
+              type="submit"
+              disabled={!selectedFile || isUploading}
+            >
+              {isUploading ? 'Uploading...' : 'Upload PDF'}
+            </button>
+          </form>
+
+          {uploadSuccess ? (
+            <p className="upload-status success">{uploadSuccess}</p>
+          ) : null}
+
+          {uploadError ? <p className="upload-status error">{uploadError}</p> : null}
+        </section>
 
         <div className="transcript" ref={transcriptRef}>
           {messages.length === 0 ? (
